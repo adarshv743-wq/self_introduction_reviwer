@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Self-Introduction Reviewer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="dark-theme">
+<main class="container">
+    <header class="header">
+        <div>
+            <span class="badge">AI Interview Assistant</span>
+            <h1>AI Self-Introduction Reviewer</h1>
+            <p>Upload your introduction video and receive transcript-based feedback.</p>
+        </div>
+        <button id="themeToggle" class="btn-secondary" type="button">Light Mode</button>
+    </header>
+
+    <section id="uploadSection" class="card">
+        <div id="dropZone" class="drop-zone">
+            <div class="upload-icon">🎥</div>
+            <strong>Drag & Drop your introduction video</strong>
+            <span>or click to select a file</span>
+            <small>MP4, AVI, MOV, MKV • Maximum 50 MB</small>
+            <input id="videoInput" type="file"
+                   accept=".mp4,.avi,.mov,.mkv,video/*" hidden>
+        </div>
+        <div id="fileInfo" class="file-info hidden"></div>
+        <button id="submitBtn" class="btn-primary hidden" type="button">
+            Analyze Introduction
+        </button>
+    </section>
+
+    <section id="loadingSection" class="card hidden loading">
+        <div class="spinner"></div>
+        <h2>Analyzing your introduction...</h2>
+        <p>Extracting audio, transcribing speech, and preparing feedback.</p>
+    </section>
+
+    <section id="resultsSection" class="hidden">
+        <div class="result-header card">
+            <div>
+                <span class="badge">Analysis Complete</span>
+                <h2>Analysis Results</h2>
+            </div>
+            <div class="score-badge" id="scoreVal">0/10</div>
+        </div>
+
+        <div class="card">
+            <h3>Your Transcript</h3>
+            <p id="transcriptText" class="transcript-box"></p>
+        </div>
+
+        <div class="results-grid">
+            <div class="card positive-card">
+                <h3>🎉 Key Positives</h3>
+                <ul id="positivesList"></ul>
+            </div>
+            <div class="card improvement-card">
+                <h3>⚠️ Areas for Improvement</h3>
+                <ul id="improvementsList"></ul>
+            </div>
+        </div>
+
+        <div class="card tips-card">
+            <h3>💡 Expert Recommendations</h3>
+            <ul id="tipsList"></ul>
+        </div>
+
+        <button id="resetBtn" class="btn-secondary reset-btn" type="button">
+            Upload Another Video
+        </button>
+    </section>
+</main>
+
+<script>
+const dropZone = document.getElementById("dropZone");
+const videoInput = document.getElementById("videoInput");
+const submitBtn = document.getElementById("submitBtn");
+const uploadSection = document.getElementById("uploadSection");
+const loadingSection = document.getElementById("loadingSection");
+const resultsSection = document.getElementById("resultsSection");
+const themeToggle = document.getElementById("themeToggle");
+const fileInfo = document.getElementById("fileInfo");
+let selectedFile = null;
+
+themeToggle.addEventListener("click", () => {
+    document.body.classList.toggle("dark-theme");
+    document.body.classList.toggle("light-theme");
+    themeToggle.textContent =
+        document.body.classList.contains("dark-theme")
+        ? "Light Mode" : "Dark Mode";
+});
+
+dropZone.addEventListener("click", () => videoInput.click());
+videoInput.addEventListener("click", e => e.stopPropagation());
+
+videoInput.addEventListener("change", e => {
+    if (e.target.files.length) handleFileSelection(e.target.files[0]);
+});
+
+["dragenter", "dragover"].forEach(name => {
+    dropZone.addEventListener(name, e => {
+        e.preventDefault();
+        dropZone.classList.add("drop-zone-over");
+    });
+});
+
+["dragleave", "drop"].forEach(name => {
+    dropZone.addEventListener(name, e => {
+        e.preventDefault();
+        dropZone.classList.remove("drop-zone-over");
+    });
+});
+
+dropZone.addEventListener("drop", e => {
+    if (e.dataTransfer.files.length)
+        handleFileSelection(e.dataTransfer.files[0]);
+});
+
+function handleFileSelection(file) {
+    const allowed = ["mp4", "avi", "mov", "mkv"];
+    const extension = file.name.split(".").pop().toLowerCase();
+
+    if (!allowed.includes(extension)) {
+        alert("Please select MP4, AVI, MOV, or MKV.");
+        return;
+    }
+
+    if (file.size > 50 * 1024 * 1024) {
+        alert("The selected file is larger than 50 MB.");
+        return;
+    }
+
+    selectedFile = file;
+    fileInfo.textContent =
+        `${file.name} • ${(file.size / 1048576).toFixed(2)} MB`;
+    fileInfo.classList.remove("hidden");
+    submitBtn.classList.remove("hidden");
+}
+
+submitBtn.addEventListener("click", async () => {
+    if (!selectedFile) return;
+
+    const formData = new FormData();
+    formData.append("video", selectedFile);
+
+    uploadSection.classList.add("hidden");
+    loadingSection.classList.remove("hidden");
+    submitBtn.disabled = true;
+
+    try {
+        const response = await fetch("/upload", {
+            method: "POST",
+            body: formData
+        });
+        let data;
+        try {
+            data = await response.json();
+        } catch (_) {
+            throw new Error(response.status === 504 || response.status === 502
+                ? "The server took too long. Try a shorter video."
+                : "Unexpected server response. Please try again.");
+        }
+
+        if (!response.ok || data.error)
+            throw new Error(data.error || "Video analysis failed.");
+
+        document.getElementById("scoreVal").textContent = data.score;
+        document.getElementById("transcriptText").textContent =
+            data.transcript || "No transcript available.";
+
+        populateList("positivesList", data.positives);
+        populateList("improvementsList", data.improvements);
+        populateList("tipsList", data.tips);
+
+        loadingSection.classList.add("hidden");
+        resultsSection.classList.remove("hidden");
+    } catch (error) {
+        alert(error.message || "Network error. Please try again.");
+        loadingSection.classList.add("hidden");
+        uploadSection.classList.remove("hidden");
+    } finally {
+        submitBtn.disabled = false;
+    }
+});
+
+function populateList(id, items) {
+    const list = document.getElementById(id);
+    list.innerHTML = "";
+    (items || []).forEach(item => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        list.appendChild(li);
+    });
+}
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+    resultsSection.classList.add("hidden");
+    uploadSection.classList.remove("hidden");
+    selectedFile = null;
+    videoInput.value = "";
+    fileInfo.textContent = "";
+    fileInfo.classList.add("hidden");
+    submitBtn.classList.add("hidden");
+});
+</script>
+</body>
+</html>
